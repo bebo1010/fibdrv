@@ -24,19 +24,30 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
+static long long fib(long long n)
+{
+    // base case
+    if (n == 0)
+        return 0;
+    if (n == 1 || n == 2)
+        return 1;
+
+    long long k = 0;
+    if (n & 1) {  // if k is even, use bit-wise to prevent modulo operator
+        k = (n - 1) >> 1;  // use right shift to perform divide by 2
+        return fib(k) * fib(k) + fib(k + 1) * fib(k + 1);
+    } else {
+        k = n >> 1;
+        return fib(k) * (2 * fib(k + 1) - fib(k));
+    }
+}
+
 static long long fib_sequence(long long k)
 {
     /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
-
-    f[0] = 0;
-    f[1] = 1;
-
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
-    }
-
-    return f[k];
+    // TODO: problem at long long integer overflow
+    // change to fast doubling first
+    return fib(k);
 }
 
 static int fib_open(struct inode *inode, struct file *file)
