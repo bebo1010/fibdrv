@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -25,35 +26,58 @@ static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static const uint64_t INIT_VALUE = 4;
-static const uint32_t ARRAY_SIZE = 1000;
-static long long fib(long long n, uint64_t *fib_array)
+#include "bigN.c"
+// static const uint32_t ARRAY_SIZE = 1000;
+// static const uint32_t STRING_LENGTH = 100000;
+static uint64_t fib(long long n, struct bigN *fib_array, char __user *buf)
 {
-    if (fib_array[n] != INIT_VALUE)
+    for (int i = 3; i < n; i++) {
+        bigN_add(&fib_array[i - 2], &fib_array[i - 1], &fib_array[i]);
+    }
+
+    uint64_t len = fib_array[n].size;
+    if (copy_to_user(buf, fib_array[n].value, len))
+        return -EFAULT;
+
+    // prototype for fast doubling
+    /*if (fib_array[n].value != NULL)
         return fib_array[n];
-
     long long k = n >> 1;
-    long long a = fib(k, fib_array);
-    long long b = fib(k + 1, fib_array);
+    struct bigN a = fib(k, fib_array);
+    struct bigN b = fib(k + 1, fib_array);
 
-    fib_array[n] = (n & 1) ? (a * a + b * b) : a * (2 * b - a);
-    return fib_array[n];
+
+    // fib_array[n] = (n & 1) ? (a * a + b * b) : a * (2 * b - a);
+    if (n & 1)
+        fib_array[n] = bigN_add(bigN_multiply(a, a), bigN_multiply(b, b));
+    else
+        fib_array[n] =
+            bigN_multiply(bigN_subtract(bigN_const_multiply(b, 2), a));
+    */
+    return len;
 }
 
-static long long fib_sequence(long long k)
+static long long fib_sequence(long long k, char __user *buf)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    // TODO: problem at long long integer overflow
-    // change to fast doubling first
-    uint64_t *fib_array = kmalloc(sizeof(uint64_t) * ARRAY_SIZE, GFP_KERNEL);
-    fib_array[0] = 0;  // set base case value first
-    fib_array[1] = 1;
-    fib_array[2] = 1;
-    for (int i = 3; i < ARRAY_SIZE; i++) {
-        fib_array[i] = INIT_VALUE;
+    // TODO: change to string so that big number could be used
+    struct bigN *fib_array = kmalloc(sizeof(struct bigN) * k, GFP_KERNEL);
+    for (int i = 0; i < 3; i++) {
+        fib_array[i].value = kmalloc(sizeof(char) * 2, GFP_KERNEL);
+        if (i == 0)
+            fib_array[i].value[0] = '0';
+        if (i == 1 || i == 2)
+            fib_array[i].value[0] = '1';
+        fib_array[i].value[1] = '\0';
+        fib_array[i].size = 1;
     }
-    uint64_t return_value = fib(k, fib_array);
+
+
+    uint64_t return_value = fib(k, fib_array, buf);
+    for (int i = 0; i < k; i++)
+        kfree(fib_array[i].value);
     kfree(fib_array);
+
+
     return return_value;
 }
 
@@ -74,11 +98,11 @@ static int fib_release(struct inode *inode, struct file *file)
 
 /* calculate the fibonacci number at given offset */
 static ssize_t fib_read(struct file *file,
-                        char *buf,
+                        char __user *user_buf,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence(*offset, user_buf);
 }
 
 /* write operation is skipped */
